@@ -11,6 +11,9 @@ u2_telemetria.csv
 u2_bot.log
 u2_bot.log.*
 u2_backtest_equity.csv
+bootstrap_summary.csv
+bootstrap_raw.csv
+bootstrap_distribution.png
 nasdaq100.csv
 
 # Python

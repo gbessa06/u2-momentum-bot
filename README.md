@@ -17,6 +17,7 @@ Bot de rebalanceamento mensal que aplica uma estratégia de **momentum relativo*
 | `gen_nasdaq100.py` | Gera `nasdaq100.csv` (scraping stockanalysis.com → Wikipedia → fallback estático embutido) |
 | `u2_bot.py` | Lógica de produção: mapeia tickers Yahoo→T212, calcula ranking de momentum, executa rebalanceamento mensal, regista trades e telemetria |
 | `backtest_u2_momentum.py` | Backtest histórico da estratégia vs. SPY/QQQ buy-and-hold (renomeado de `backtest_EMA12.py` — o nome era um resquício de uma versão anterior; o script nunca usou EMA, é o mesmo motor de momentum do `u2_bot.py`) |
+| `monte_carlo_robustness.py` | Block bootstrap sobre a equity curve do backtest — quantifica a incerteza estatística à volta do CAGR/MaxDD/Sharpe reportados |
 
 Modos de execução do `u2_bot.py`:
 ```bash
@@ -63,7 +64,50 @@ Nenhum dos dois é "o resultado" — são duas leituras da mesma estratégia com
 
 **Conclusão honesta**: o teste 1 é mais robusto no período out-of-sample recente (mais parecido com as condições atuais de mercado), mas carrega mais survivorship bias. O teste 2 é mais limpo metodologicamente no in-sample, mas usa um universo desatualizado. Ambos batem o QQQ buy-and-hold no CAGR ajustado a Sharpe/Calmar na maioria dos cortes, mas o max drawdown da estratégia (25-48%) é elevado e deve pesar tanto quanto o CAGR na avaliação. Nenhum destes números deve ser lido como retorno esperado garantido — são o resultado de dois desenhos de teste imperfeitos, cada um a compensar parcialmente a fraqueza do outro.
 
+## Robustez estatística — Block Bootstrap
+
+Os números acima são **um único caminho histórico**. Para saber quão sensível o resultado é à sequência específica de meses que calhou acontecer, `monte_carlo_robustness.py` reamostra os retornos mensais da equity curve em **blocos de 6 meses** (preserva parte da autocorrelação/regime que um bootstrap mês-a-mês destruiria) e reconstrói milhares de histórias alternativas.
+
+```bash
+python3 backtest_u2_momentum.py --universe nasdaq100.csv   # gera u2_backtest_equity.csv
+python3 monte_carlo_robustness.py --input u2_backtest_equity.csv
+```
+
+Output: percentis (p5/p25/mediana/p75/p95) de CAGR, MaxDD e Sharpe sobre os caminhos reamostrados, mais um histograma (`bootstrap_distribution.png`). Isto responde à pergunta que um único backtest não responde: *"se a história tivesse corrido numa ordem ligeiramente diferente, o resultado seria parecido ou foi sorte de sequência?"*
+
+### Resultados (5000 simulações, blocos de 6 meses, 147 retornos mensais / 12.2 anos)
+
+**Teste 1 — Nasdaq-100 atual**
+
+| | CAGR % | MaxDD % | Sharpe |
+|---|---|---|---|
+| Observado | 38.06 | 40.78 | 1.04 |
+| p5 | 18.41 | 22.91 | 0.67 |
+| p25 | 29.98 | 30.76 | 0.92 |
+| p50 (mediana) | 38.78 | 37.06 | 1.08 |
+| p75 | 48.15 | 43.60 | 1.24 |
+| p95 | 63.34 | 56.23 | 1.46 |
+
+**Teste 2 — 28 mega-caps fixas (2013)**
+
+| | CAGR % | MaxDD % | Sharpe |
+|---|---|---|---|
+| Observado | 18.85 | 21.79 | 0.95 |
+| p5 | 12.00 | 14.48 | 0.67 |
+| p25 | 16.12 | 18.37 | 0.86 |
+| p50 (mediana) | 19.17 | 21.79 | 0.98 |
+| p75 | 22.16 | 25.60 | 1.11 |
+| p95 | 26.82 | 32.22 | 1.30 |
+
+![Distribuição do bootstrap — Nasdaq-100 atual](bootstrap_nasdaq100.png)
+![Distribuição do bootstrap — 28 mega-caps (2013)](bootstrap_megacaps.png)
+
+**Leitura honesta:** em ambos os testes, mesmo o percentil 5 (cenário pessimista de reamostragem) fica com CAGR positivo e acima do QQQ B&H — não há um único caminho reamostrado, em 5000, que aponte para prejuízo. Isto é evidência de que o resultado observado não depende de uma sequência de meses particularmente sortuda. Dito isto, o intervalo é largo (ex: 18% a 63% de CAGR no Teste 1) — a estratégia claramente **amplifica tanto o lado bom como o mau** face ao índice, o que é consistente com o MaxDD mais alto (25-56%) do que o QQQ B&H (35%). O Teste 2 tem intervalos mais estreitos e um Sharpe mediano semelhante ao QQQ, refletindo o universo mais pequeno e menos concentrado em poucos vencedores.
+
+Com ~8-12 anos de retornos mensais (96-144 pontos), o bootstrap tem as suas próprias limitações — não inventa dados novos, só quantifica a incerteza dentro do que já foi observado. Trata o intervalo p5-p95 como uma faixa plausível, não como garantia, e nota que ele **não corrige** o survivorship bias do Teste 1, que é um problema dos dados de entrada, não da reamostragem.
+
 ## Limitações conhecidas
+
 
 - Survivorship bias no universo do Teste 1 (ver acima).
 - Custos de transação modelados de forma simples: 5 bps por operação (compra e venda), sem modelar slippage nem spread — na prática, para ações líquidas do Nasdaq-100 é uma aproximação razoável, mas otimista para nomes mais ilíquidos.
